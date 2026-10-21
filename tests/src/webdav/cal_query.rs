@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::utils::server::TestServer;
+use crate::utils::{server::TestServer, webdav::DummyWebDavClient};
 
 use ahash::AHashSet;
 use calcard::{common::timezone::Tz, icalendar::ICalendar};
@@ -176,6 +176,34 @@ pub async fn test(test: &TestServer) {
         ),
         remove_dtstamp(REPORT_11_RESPONSE)
     );
+
+    // Test 11b: CALDAV:read-free-busy alone is enough for a scheduling outbox free-busy request
+    let sharee_client = test.account("jane@example.com").webdav_client();
+    let sharee_principal = format!(
+        "{}/jane%40example.com/",
+        DavResourceName::Principal.base_path()
+    );
+    let busy_period = "FREEBUSY;FBTYPE=BUSY-UNAVAILABLE:20060105T100000Z/20060105T120000Z";
+    assert!(
+        !outbox_freebusy(&sharee_client).await.contains("FREEBUSY;"),
+        "free-busy data returned without any grant"
+    );
+    client
+        .request(
+            "ACL",
+            &cal_path,
+            &ACL_READ_FREE_BUSY.replace("$HREF", &sharee_principal),
+        )
+        .await
+        .with_status(StatusCode::OK);
+    assert!(
+        outbox_freebusy(&sharee_client).await.contains(busy_period),
+        "missing free-busy data with a read-free-busy grant"
+    );
+    client
+        .request("ACL", &cal_path, ACL_EMPTY)
+        .await
+        .with_status(StatusCode::OK);
 
     // Test 12: JMAP-style event stored with an entry-less VCALENDAR wrapper
     client
@@ -896,6 +924,22 @@ END:VEVENT
 END:VCALENDAR
 "#;
 
+const ACL_READ_FREE_BUSY: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
+   <D:acl xmlns:D="DAV:" xmlns:A="urn:ietf:params:xml:ns:caldav">
+     <D:ace>
+       <D:principal>
+         <D:href>$HREF</D:href>
+       </D:principal>
+       <D:grant>
+         <D:privilege><A:read-free-busy/></D:privilege>
+       </D:grant>
+     </D:ace>
+   </D:acl>"#;
+
+const ACL_EMPTY: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
+   <D:acl xmlns:D="DAV:">
+   </D:acl>"#;
+
 const REPORT_10: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
    <C:free-busy-query xmlns:C="urn:ietf:params:xml:ns:caldav">
      <C:time-range start="20060104T140000Z"
@@ -1185,6 +1229,39 @@ FREEBUSY:20060103T100000Z/20060103T120000Z
 FREEBUSY:20060104T100000Z/20060104T120000Z
 FREEBUSY;FBTYPE=BUSY-UNAVAILABLE:20060105T100000Z/20060105T120000Z
 FREEBUSY:20060106T100000Z/20060106T120000Z
+END:VFREEBUSY
+END:VCALENDAR
+"#;
+
+async fn outbox_freebusy(client: &DummyWebDavClient) -> String {
+    let response = client
+        .request_with_headers(
+            "POST",
+            "/dav/itip/jane%40example.com/outbox/",
+            [("content-type", "text/calendar; charset=utf-8")],
+            OUTBOX_FREEBUSY,
+        )
+        .await
+        .with_status(StatusCode::OK);
+    response
+        .xml
+        .iter()
+        .find(|(key, _)| key == "A:schedule-response.A:response.A:calendar-data")
+        .map(|(_, value)| value.replace("\r\n ", "").replace("\n ", ""))
+        .unwrap_or_else(|| panic!("missing calendar data in response: {response:?}"))
+}
+
+const OUTBOX_FREEBUSY: &str = r#"BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+METHOD:REQUEST
+BEGIN:VFREEBUSY
+UID:4FD3AD926351
+DTSTAMP:20090602T190420Z
+DTSTART:20060104T140000Z
+DTEND:20060105T220000Z
+ORGANIZER:mailto:jane@example.com
+ATTENDEE:mailto:john@example.com
 END:VFREEBUSY
 END:VCALENDAR
 "#;

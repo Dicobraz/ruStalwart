@@ -106,11 +106,12 @@ impl CalendarFreebusyRequestHandler for Server {
     ) -> crate::Result<ICalendar> {
         // Obtain shared ids
         let shared_ids = if !access_token.is_member(account_id) {
+            // Either "read" or "read-free-busy" is enough (RFC 4791, section 6.1.1)
             resources
                 .shared_items(
                     access_token,
                     [Acl::ReadItems, Acl::SchedulingReadFreeBusy],
-                    false,
+                    true,
                 )
                 .into()
         } else {
