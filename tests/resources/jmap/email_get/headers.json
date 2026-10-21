@@ -5,8 +5,8 @@
   "keywords": {
     "tag": true
   },
-  "size": 4535,
-  "receivedAt": "2113-09-16T10:13:20Z",
+  "size": 4592,
+  "receivedAt": "2115-07-08T03:33:20Z",
   "messageId": [
     "5678.21-Nov-1997@example.com"
   ],
@@ -479,6 +479,14 @@
   "header:Keywords:asText": "multipart, alternative, example",
   "header:Keywords:asText:all": [
     "multipart, alternative, example"
+  ],
+  "header:List-ID": " =?utf-8?q?Probe_list?= <probe-list.example.com>",
+  "header:List-ID:all": [
+    " =?utf-8?q?Probe_list?= <probe-list.example.com>"
+  ],
+  "header:List-ID:asText": "Probe list <probe-list.example.com>",
+  "header:List-ID:asText:all": [
+    "Probe list <probe-list.example.com>"
   ],
   "header:List-Owner": " <http://www.host.com/list.cgi?cmd=sub&lst=list>,\n       <mailto:list-manager@host.com?body=subscribe%20list>",
   "header:List-Owner:all": [

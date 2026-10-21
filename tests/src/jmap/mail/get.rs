@@ -309,6 +309,7 @@ pub fn all_headers() -> Vec<email::Property> {
     for header in [
         HeaderName::Subject,
         HeaderName::Keywords,
+        HeaderName::ListId,
         HeaderName::Other("X-Text-Single".into()),
         HeaderName::Other("X-Text".into()),
     ] {

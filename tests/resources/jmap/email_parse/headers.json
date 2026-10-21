@@ -446,6 +446,14 @@
   "header:Keywords:asText:all": [
     "multipart, alternative, example"
   ],
+  "header:List-ID": " =?utf-8?q?Probe_list?= <probe-list.example.com>",
+  "header:List-ID:all": [
+    " =?utf-8?q?Probe_list?= <probe-list.example.com>"
+  ],
+  "header:List-ID:asText": "Probe list <probe-list.example.com>",
+  "header:List-ID:asText:all": [
+    "Probe list <probe-list.example.com>"
+  ],
   "header:List-Owner": " <http://www.host.com/list.cgi?cmd=sub&lst=list>,\n       <mailto:list-manager@host.com?body=subscribe%20list>",
   "header:List-Owner:all": [
     " <http://www.host.com/list.cgi?cmd=sub&lst=list>,\n       <mailto:list-manager@host.com?body=subscribe%20list>"
