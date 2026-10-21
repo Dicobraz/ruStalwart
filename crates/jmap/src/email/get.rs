@@ -38,6 +38,7 @@ use types::{
     collection::Collection,
     field::EmailField,
     id::Id,
+    keyword::Keyword,
 };
 use utils::chained_bytes::ChainedBytes;
 
@@ -257,8 +258,16 @@ impl EmailGet for Server {
                         email.insert_unchecked(property.clone(), Value::Object(obj));
                     }
                     EmailProperty::Keywords => {
-                        let mut obj = Map::with_capacity(2);
+                        // Keywords are returned in lowercase (see EmailProperty::Keyword), so
+                        // stored keywords that differ only in case are returned once
+                        let mut keywords: Vec<Keyword> = Vec::with_capacity(2);
                         for keyword in cache.expand_keywords(data) {
+                            if !keywords.iter().any(|k| k.eq_ignore_case(&keyword)) {
+                                keywords.push(keyword);
+                            }
+                        }
+                        let mut obj = Map::with_capacity(keywords.len());
+                        for keyword in keywords {
                             obj.insert_unchecked(EmailProperty::Keyword(keyword), true);
                         }
                         email.insert_unchecked(property.clone(), Value::Object(obj));

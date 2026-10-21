@@ -952,6 +952,41 @@ impl MessageDataBuilder {
         self.keywords.len() != prev_len
     }
 
+    // JMAP variants: keywords are case-insensitive (RFC 8621, section 4.1.1).
+    // A keyword that differs from a stored one only in case is not added
+    // again, and the stored spelling is kept.
+
+    pub fn set_keywords_ignore_case(&mut self, keywords: Vec<Keyword>) {
+        let mut new_keywords: Vec<Keyword> = Vec::with_capacity(keywords.len());
+        for keyword in keywords {
+            if !new_keywords.iter().any(|k| k.eq_ignore_case(&keyword)) {
+                new_keywords.push(
+                    self.keywords
+                        .iter()
+                        .find(|k| k.eq_ignore_case(&keyword))
+                        .cloned()
+                        .unwrap_or(keyword),
+                );
+            }
+        }
+        self.keywords = new_keywords;
+    }
+
+    pub fn add_keyword_ignore_case(&mut self, keyword: Keyword) -> bool {
+        if !self.keywords.iter().any(|k| k.eq_ignore_case(&keyword)) {
+            self.keywords.push(keyword);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn remove_keyword_ignore_case(&mut self, keyword: &Keyword) -> bool {
+        let prev_len = self.keywords.len();
+        self.keywords.retain(|k| !k.eq_ignore_case(keyword));
+        self.keywords.len() != prev_len
+    }
+
     pub fn set_mailboxes(&mut self, mailboxes: Vec<UidMailbox>) {
         self.mailboxes = mailboxes;
     }

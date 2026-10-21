@@ -15,7 +15,7 @@ use trc::AddContext;
 use types::{
     acl::Acl,
     collection::Collection,
-    keyword::{Keyword, OTHER},
+    keyword::{Keyword, OTHER, other_eq_ignore_case},
 };
 use utils::map::bitmap::Bitmap;
 
@@ -171,6 +171,12 @@ pub trait MessageCacheAccess {
 
     fn without_keyword(&self, keyword: &Keyword) -> impl Iterator<Item = &MessageCache>;
 
+    // JMAP variants: keywords match without case (RFC 8621, section 4.1.1)
+    fn with_keyword_ignore_case(&self, keyword: &Keyword) -> impl Iterator<Item = &MessageCache>;
+
+    fn without_keyword_ignore_case(&self, keyword: &Keyword)
+    -> impl Iterator<Item = &MessageCache>;
+
     fn in_mailbox_with_keyword(
         &self,
         mailbox_id: u32,
@@ -194,6 +200,8 @@ pub trait MessageCacheAccess {
     fn expand_keywords(&self, message: &MessageCache) -> impl Iterator<Item = Keyword>;
 
     fn has_keyword(&self, message: &MessageCache, keyword: &Keyword) -> bool;
+
+    fn has_keyword_ignore_case(&self, message: &MessageCache, keyword: &Keyword) -> bool;
 }
 
 impl MessageCacheAccess for MessageStoreCache {
@@ -233,6 +241,25 @@ impl MessageCacheAccess for MessageStoreCache {
             .items
             .iter()
             .filter(move |m| keyword_id.is_none_or(|id| m.keywords & (1 << id) == 0))
+    }
+
+    fn with_keyword_ignore_case(&self, keyword: &Keyword) -> impl Iterator<Item = &MessageCache> {
+        let mask = keyword_mask_ignore_case(self, keyword);
+        self.emails
+            .items
+            .iter()
+            .filter(move |m| m.keywords & mask != 0)
+    }
+
+    fn without_keyword_ignore_case(
+        &self,
+        keyword: &Keyword,
+    ) -> impl Iterator<Item = &MessageCache> {
+        let mask = keyword_mask_ignore_case(self, keyword);
+        self.emails
+            .items
+            .iter()
+            .filter(move |m| m.keywords & mask == 0)
     }
 
     fn in_mailbox_with_keyword(
@@ -307,6 +334,10 @@ impl MessageCacheAccess for MessageStoreCache {
     fn has_keyword(&self, message: &MessageCache, keyword: &Keyword) -> bool {
         keyword_to_id(self, keyword).is_some_and(|id| message.keywords & (1 << id) != 0)
     }
+
+    fn has_keyword_ignore_case(&self, message: &MessageCache, keyword: &Keyword) -> bool {
+        message.keywords & keyword_mask_ignore_case(self, keyword) != 0
+    }
 }
 
 fn email_insert(cache: &mut MessagesCacheBuilder, item: MessageCache) {
@@ -335,6 +366,21 @@ fn keyword_to_id(cache: &MessageStoreCache, keyword: &Keyword) -> Option<u32> {
             .iter()
             .position(|k| **k == *name)
             .map(|idx| (OTHER + idx) as u32),
+    }
+}
+
+/// Bits of every cached keyword that matches without case
+#[inline]
+fn keyword_mask_ignore_case(cache: &MessageStoreCache, keyword: &Keyword) -> u128 {
+    match keyword.id() {
+        Ok(id) => 1 << id,
+        Err(name) => cache
+            .emails
+            .keywords
+            .iter()
+            .enumerate()
+            .filter(|(_, k)| other_eq_ignore_case(k, name))
+            .fold(0, |mask, (idx, _)| mask | (1 << (OTHER + idx))),
     }
 }
 

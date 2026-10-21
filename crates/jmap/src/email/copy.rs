@@ -37,6 +37,7 @@ use store::write::BatchBuilder;
 use trc::AddContext;
 use types::{
     acl::Acl,
+    keyword::Keyword,
     type_state::{DataType, StateChange},
 };
 use utils::map::vec_map::VecMap;
@@ -124,16 +125,17 @@ impl JmapEmailCopy for Server {
                             .into_expanded_boolean_set()
                             .filter_map(|id| id.try_into_property()?.try_into_keyword())
                             .collect();
+                        Keyword::dedup_ignore_case(&mut keywords);
                     }
                     (Key::Property(EmailProperty::Pointer(pointer)), value) => {
                         match handle_email_patch(&pointer, value) {
                             PatchResult::SetKeyword(keyword) => {
-                                if !keywords.contains(keyword) {
+                                if !keywords.iter().any(|k| k.eq_ignore_case(keyword)) {
                                     keywords.push(keyword.clone());
                                 }
                             }
                             PatchResult::RemoveKeyword(keyword) => {
-                                keywords.retain(|k| k != keyword);
+                                keywords.retain(|k| !k.eq_ignore_case(keyword));
                             }
                             PatchResult::AddMailbox(id) => {
                                 if !mailboxes.contains(&id) {
