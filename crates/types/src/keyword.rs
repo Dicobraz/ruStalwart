@@ -141,6 +141,26 @@ impl Keyword {
         }
     }
 
+    /// JMAP compares keywords without case (RFC 8621, section 4.1.1). Keywords
+    /// are stored as received, so IMAP keeps seeing the original spelling.
+    pub fn eq_ignore_case(&self, other: &Keyword) -> bool {
+        match (self, other) {
+            (Keyword::Other(a), Keyword::Other(b)) => other_eq_ignore_case(a, b),
+            _ => self == other,
+        }
+    }
+
+    /// Drops keywords that differ from an earlier one only in case.
+    pub fn dedup_ignore_case(keywords: &mut Vec<Keyword>) {
+        let mut unique: Vec<Keyword> = Vec::with_capacity(keywords.len());
+        for keyword in keywords.drain(..) {
+            if !unique.iter().any(|k| k.eq_ignore_case(&keyword)) {
+                unique.push(keyword);
+            }
+        }
+        *keywords = unique;
+    }
+
     pub fn try_parse(value: &str) -> Option<Self> {
         value
             .split_at_checked(1)
@@ -412,6 +432,13 @@ impl FromStr for Keyword {
 }
 
 impl ArchivedKeyword {
+    pub fn eq_ignore_case(&self, other: &Keyword) -> bool {
+        match (self, other) {
+            (ArchivedKeyword::Other(a), Keyword::Other(b)) => other_eq_ignore_case(a, b),
+            _ => self == other,
+        }
+    }
+
     pub fn id(&self) -> Result<u32, &str> {
         match self {
             ArchivedKeyword::Seen => Ok(SEEN as u32),
@@ -534,5 +561,47 @@ impl<'de> serde::Deserialize<'de> for Keyword {
 impl<'x, P: Property, E: Element + From<Keyword>> From<Keyword> for Value<'x, P, E> {
     fn from(id: Keyword) -> Self {
         Value::Element(E::from(id))
+    }
+}
+
+pub fn other_eq_ignore_case(a: &str, b: &str) -> bool {
+    a == b
+        || a.chars()
+            .flat_map(char::to_lowercase)
+            .eq(b.chars().flat_map(char::to_lowercase))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Keyword;
+
+    #[test]
+    fn keywords_compare_ignoring_case() {
+        let stored = Keyword::parse("Pm.Remind.T0900");
+        assert_eq!(stored, Keyword::Other("Pm.Remind.T0900".into()));
+        assert!(stored.eq_ignore_case(&Keyword::parse("pm.remind.t0900")));
+        assert!(Keyword::parse("PM.REMIND.T0900").eq_ignore_case(&stored));
+        assert!(!stored.eq_ignore_case(&Keyword::parse("pm.remind.t1000")));
+        assert!(Keyword::parse("\u{c9}t\u{e9}").eq_ignore_case(&Keyword::parse("\u{e9}T\u{c9}")));
+        assert!(Keyword::Seen.eq_ignore_case(&Keyword::parse("$SEEN")));
+        assert!(!Keyword::Seen.eq_ignore_case(&Keyword::Draft));
+
+        let mut keywords = vec![
+            Keyword::parse("Label"),
+            Keyword::parse("label"),
+            Keyword::Seen,
+            Keyword::parse("$seen"),
+            Keyword::parse("LABEL"),
+            Keyword::parse("Other"),
+        ];
+        Keyword::dedup_ignore_case(&mut keywords);
+        assert_eq!(
+            keywords,
+            vec![
+                Keyword::parse("Label"),
+                Keyword::Seen,
+                Keyword::parse("Other")
+            ]
+        );
     }
 }

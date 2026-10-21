@@ -393,26 +393,30 @@ fn eval_filter_condition(condition: &EmailFilter, context: &FilterContext) -> bo
         EmailFilter::After(date) => received_at(context) >= date.timestamp(),
         EmailFilter::MinSize(size) => context.data.size >= *size,
         EmailFilter::MaxSize(size) => context.data.size < *size,
-        EmailFilter::HasKeyword(keyword) => {
-            context.data.keywords.iter().any(|value| value == keyword)
-        }
-        EmailFilter::NotKeyword(keyword) => {
-            !context.data.keywords.iter().any(|value| value == keyword)
-        }
+        EmailFilter::HasKeyword(keyword) => context
+            .data
+            .keywords
+            .iter()
+            .any(|value| value.eq_ignore_case(keyword)),
+        EmailFilter::NotKeyword(keyword) => !context
+            .data
+            .keywords
+            .iter()
+            .any(|value| value.eq_ignore_case(keyword)),
         EmailFilter::AllInThreadHaveKeyword(keyword) => context.cache.is_some_and(|cache| {
             cache
                 .in_thread(context.data.thread_id)
-                .all(|message| cache.has_keyword(message, keyword))
+                .all(|message| cache.has_keyword_ignore_case(message, keyword))
         }),
         EmailFilter::SomeInThreadHaveKeyword(keyword) => context.cache.is_some_and(|cache| {
             cache
                 .in_thread(context.data.thread_id)
-                .any(|message| cache.has_keyword(message, keyword))
+                .any(|message| cache.has_keyword_ignore_case(message, keyword))
         }),
         EmailFilter::NoneInThreadHaveKeyword(keyword) => context.cache.is_some_and(|cache| {
             !cache
                 .in_thread(context.data.thread_id)
-                .any(|message| cache.has_keyword(message, keyword))
+                .any(|message| cache.has_keyword_ignore_case(message, keyword))
         }),
         EmailFilter::HasAttachment(value) => {
             ((context.metadata.rcvd_attach.to_native() & MESSAGE_HAS_ATTACHMENT) != 0) == *value

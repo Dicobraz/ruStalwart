@@ -204,14 +204,14 @@ impl EmailQuery for Server {
                     EmailFilter::HasKeyword(keyword) => {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cached_messages
-                                .with_keyword(&keyword)
+                                .with_keyword_ignore_case(&keyword)
                                 .map(|item| item.document_id),
                         )));
                     }
                     EmailFilter::NotKeyword(keyword) => {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cached_messages
-                                .without_keyword(&keyword)
+                                .without_keyword_ignore_case(&keyword)
                                 .map(|item| item.document_id),
                         )));
                     }
@@ -294,7 +294,7 @@ impl EmailQuery for Server {
                 EmailComparator::HasKeyword(keyword) => SearchComparator::set(
                     RoaringBitmap::from_iter(
                         cached_messages
-                            .with_keyword(&keyword)
+                            .with_keyword_ignore_case(&keyword)
                             .map(|item| item.document_id),
                     ),
                     comparator.is_ascending,
@@ -388,8 +388,11 @@ impl EmailQuery for Server {
 }
 
 fn thread_keywords(cache: &MessageStoreCache, keyword: Keyword, match_all: bool) -> RoaringBitmap {
-    let keyword_doc_ids =
-        RoaringBitmap::from_iter(cache.with_keyword(&keyword).map(|item| item.document_id));
+    let keyword_doc_ids = RoaringBitmap::from_iter(
+        cache
+            .with_keyword_ignore_case(&keyword)
+            .map(|item| item.document_id),
+    );
     if keyword_doc_ids.is_empty() {
         return keyword_doc_ids;
     }

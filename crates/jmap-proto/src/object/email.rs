@@ -168,7 +168,16 @@ impl Property for EmailProperty {
             EmailProperty::IsEncodingProblem => "isEncodingProblem",
             EmailProperty::IsTruncated => "isTruncated",
             EmailProperty::Header(header) => return header.to_string().into(),
-            EmailProperty::Keyword(keyword) => return keyword.to_string().into(),
+            EmailProperty::Keyword(keyword) => {
+                // Keywords are stored as received; JMAP servers MUST return them
+                // in lowercase (RFC 8621, section 4.1.1)
+                let keyword = keyword.to_string();
+                return if keyword.chars().any(char::is_uppercase) {
+                    keyword.to_lowercase().into()
+                } else {
+                    keyword.into()
+                };
+            }
             EmailProperty::IdValue(id) => return id.to_string().into(),
             EmailProperty::Pointer(json_pointer) => return json_pointer.to_string().into(),
             EmailProperty::IdReference(r) => return format!("#{r}").into(),

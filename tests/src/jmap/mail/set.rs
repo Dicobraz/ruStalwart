@@ -34,6 +34,7 @@ pub async fn test(test: &TestServer) {
     create(&client, &mailbox_id).await;
     update(&client, &mailbox_id).await;
     update_preserves_uids(test, &client, account.id().document_id(), &mailbox_id).await;
+    keywords_ignore_case(test, &client, account.id().document_id(), &mailbox_id).await;
 
     test.destroy_all_mailboxes(account).await;
     test.account("admin@example.com")
@@ -367,6 +368,146 @@ async fn update_preserves_uids(
         .mailbox_destroy(&test_mailbox_id, true)
         .await
         .unwrap();
+}
+
+async fn keywords_ignore_case(
+    test: &TestServer,
+    client: &Client,
+    account_id: u32,
+    mailbox_id: &str,
+) {
+    // Keywords are stored as received, returned in lowercase and compared
+    // without case (RFC 8621, section 4.1.1)
+    let email_id = client
+        .email_import(
+            concat!(
+                "From: bill@example.com\r\n",
+                "To: jdoe@example.com\r\n",
+                "Subject: Keyword case\r\n",
+                "\r\n",
+                "Keyword case test.\r\n",
+            )
+            .as_bytes()
+            .to_vec(),
+            [mailbox_id],
+            Some(["Pm.Remind.T0900", "Label"]),
+            None,
+        )
+        .await
+        .unwrap()
+        .take_id();
+    let document_id = Id::from_str(&email_id).unwrap().document_id();
+    assert_email_properties(
+        client,
+        &email_id,
+        &[mailbox_id],
+        &["pm.remind.t0900", "label"],
+    )
+    .await;
+    assert_eq!(
+        stored_keywords(test, account_id, document_id).await,
+        ["Label", "Pm.Remind.T0900"]
+    );
+
+    // hasKeyword and notKeyword match in any case
+    for keyword in ["pm.remind.t0900", "PM.Remind.T0900"] {
+        let ids = client
+            .email_query(
+                email::query::Filter::has_keyword(keyword).into(),
+                None::<Vec<_>>,
+            )
+            .await
+            .unwrap()
+            .take_ids();
+        assert_eq!(ids, [email_id.clone()], "hasKeyword {keyword}");
+        let ids = client
+            .email_query(
+                email::query::Filter::not_keyword(keyword).into(),
+                None::<Vec<_>>,
+            )
+            .await
+            .unwrap()
+            .take_ids();
+        assert!(!ids.contains(&email_id), "notKeyword {keyword}");
+    }
+
+    // Setting a keyword that exists in another case adds nothing
+    let mut request = client.build();
+    request
+        .set_email()
+        .update(&email_id)
+        .keyword("pm.remind.t0900", true)
+        .keyword("LABEL", true);
+    request
+        .send_set_email()
+        .await
+        .unwrap()
+        .updated(&email_id)
+        .unwrap();
+    assert_eq!(
+        stored_keywords(test, account_id, document_id).await,
+        ["Label", "Pm.Remind.T0900"]
+    );
+
+    // Replacing all keywords keeps the stored spelling of those already present
+    let mut request = client.build();
+    request
+        .set_email()
+        .update(&email_id)
+        .keywords(["label", "New.Tag"]);
+    request
+        .send_set_email()
+        .await
+        .unwrap()
+        .updated(&email_id)
+        .unwrap();
+    assert_email_properties(client, &email_id, &[mailbox_id], &["label", "new.tag"]).await;
+    assert_eq!(
+        stored_keywords(test, account_id, document_id).await,
+        ["Label", "New.Tag"]
+    );
+
+    // Removing works in any case
+    let mut request = client.build();
+    request
+        .set_email()
+        .update(&email_id)
+        .keyword("LABEL", false);
+    request
+        .send_set_email()
+        .await
+        .unwrap()
+        .updated(&email_id)
+        .unwrap();
+    assert_email_properties(client, &email_id, &[mailbox_id], &["new.tag"]).await;
+    assert_eq!(
+        stored_keywords(test, account_id, document_id).await,
+        ["New.Tag"]
+    );
+
+    client.email_destroy(&email_id).await.unwrap();
+}
+
+async fn stored_keywords(test: &TestServer, account_id: u32, document_id: u32) -> Vec<String> {
+    let mut keywords = test
+        .server
+        .store()
+        .get_value::<Archive<AlignedBytes>>(ValueKey::archive(
+            account_id,
+            Collection::Email,
+            document_id,
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .deserialize::<MessageData>()
+        .unwrap()
+        .keywords
+        .iter()
+        .map(|k| k.to_string())
+        .collect::<Vec<_>>();
+    keywords.sort();
+    keywords
 }
 
 async fn message_uids(

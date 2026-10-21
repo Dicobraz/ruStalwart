@@ -167,6 +167,9 @@ impl EmailImport for Server {
                 );
                 continue;
             }
+            // Keywords that differ only in case are one keyword (RFC 8621, section 4.1.1)
+            let mut keywords = email.keywords;
+            Keyword::dedup_ignore_case(&mut keywords);
             match self
                 .email_ingest(IngestEmail {
                     raw_message: &raw_message,
@@ -174,14 +177,13 @@ impl EmailImport for Server {
                     blob_hash: Some(&blob_id.hash),
                     access_token: import_access_token.as_ref().unwrap_or(access_token),
                     source: IngestSource::Jmap {
-                        train_classifier: email
-                            .keywords
+                        train_classifier: keywords
                             .iter()
                             .any(|k| matches!(k, Keyword::Junk | Keyword::NotJunk))
                             || mailbox_ids.contains(&JUNK_ID),
                     },
                     mailbox_ids,
-                    keywords: email.keywords,
+                    keywords,
                     received_at: email.received_at.map(|r| r.into()),
                     session_id: session.session_id,
                 })

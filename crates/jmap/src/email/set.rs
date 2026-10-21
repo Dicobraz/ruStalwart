@@ -179,16 +179,17 @@ impl EmailSet for Server {
                             .into_expanded_boolean_set()
                             .filter_map(|id| id.try_into_property()?.try_into_keyword())
                             .collect();
+                        Keyword::dedup_ignore_case(&mut keywords);
                     }
                     (EmailProperty::Pointer(pointer), value) => {
                         match handle_email_patch(&pointer, value) {
                             PatchResult::SetKeyword(keyword) => {
-                                if !keywords.contains(keyword) {
+                                if !keywords.iter().any(|k| k.eq_ignore_case(keyword)) {
                                     keywords.push(keyword.clone());
                                 }
                             }
                             PatchResult::RemoveKeyword(keyword) => {
-                                keywords.retain(|k| k != keyword);
+                                keywords.retain(|k| !k.eq_ignore_case(keyword));
                             }
                             PatchResult::AddMailbox(id) => {
                                 if !mailboxes.contains(&id) {
@@ -864,7 +865,7 @@ impl EmailSet for Server {
                         );
                     }
                     (Key::Property(EmailProperty::Keywords), Value::Object(keywords_)) => {
-                        new_data.set_keywords(
+                        new_data.set_keywords_ignore_case(
                             keywords_
                                 .into_expanded_boolean_set()
                                 .filter_map(|keyword| {
@@ -876,10 +877,10 @@ impl EmailSet for Server {
                     (Key::Property(EmailProperty::Pointer(pointer)), value) => {
                         match handle_email_patch(&pointer, value) {
                             PatchResult::SetKeyword(keyword) => {
-                                new_data.add_keyword(keyword.clone());
+                                new_data.add_keyword_ignore_case(keyword.clone());
                             }
                             PatchResult::RemoveKeyword(keyword) => {
-                                new_data.remove_keyword(keyword);
+                                new_data.remove_keyword_ignore_case(keyword);
                             }
                             PatchResult::AddMailbox(id) => {
                                 new_data.add_mailbox(UidMailbox::new_unassigned(id));
