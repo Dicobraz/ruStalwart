@@ -20,6 +20,7 @@ References: <1234@local.machine.example>
 References: <789@local.machine.example>
             <abcd@example.net>
 Keywords: multipart, alternative, example
+List-Id: =?utf-8?q?Probe_list?= <probe-list.example.com>
 List-Post: <mailto:moderator@host.com> (Postings are Moderated)
 List-Subscribe: (Use this command to join the list)
        <mailto:list-manager@host.com?body=subscribe%20list>

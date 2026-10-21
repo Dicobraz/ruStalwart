@@ -77,7 +77,11 @@ impl HeaderToValue for Vec<Header<'_>> {
             _ => return Value::Null,
         };
 
-        let is_raw = matches!(form, HeaderForm::Raw) || !header_name.is_structured();
+        // List-Id is parsed as an address, which has no Text form, so re-parse
+        // the raw value when the Text form is requested (RFC 8621, section 4.1.2.2)
+        let is_raw = matches!(form, HeaderForm::Raw)
+            || !header_name.is_structured()
+            || (matches!(form, HeaderForm::Text) && matches!(header_name, HeaderName::ListId));
         let mut headers = Vec::new();
         let header_name = header_name.as_str();
         for header in self.iter().rev() {
@@ -332,7 +336,11 @@ impl HeaderToValue for ArchivedMessageMetadataPart {
             _ => return Value::Null,
         };
 
-        let is_raw = matches!(form, HeaderForm::Raw) || !header_name.is_structured();
+        // List-Id is parsed as an address, which has no Text form, so re-parse
+        // the raw value when the Text form is requested (RFC 8621, section 4.1.2.2)
+        let is_raw = matches!(form, HeaderForm::Raw)
+            || !header_name.is_structured()
+            || (matches!(form, HeaderForm::Text) && matches!(header_name, HeaderName::ListId));
         let mut headers = Vec::new();
         let header_name = header_name.as_str();
         for header in self.headers.iter().rev() {
