@@ -98,6 +98,9 @@ pub async fn test(test: &TestServer) {
     println!("Running JMAP Mail query options tests...");
     query_options(&client).await;
 
+    println!("Running JMAP Mail text across fields tests...");
+    text_across_fields(test, &client).await;
+
     println!("Deleting all messages...");
     let mut request = client.build();
     let result_ref = request.query_email().result_reference();
@@ -412,6 +415,62 @@ pub async fn query(client: &Client, can_stem: bool) {
             results, expected_results,
             "failed test!\nfilter: {filter:?}\nsort: {sort:?}\nmissing: {missing:?}\nextra: {extra:?}"
         );
+    }
+}
+
+pub async fn text_across_fields(test: &TestServer, client: &Client) {
+    let email_id = client
+        .email_import(
+            concat!(
+                "From: Probe <probe@example.com>
+",
+                "To: jdoe@example.com
+",
+                "Subject: Re: Budget zq17925 planning
+",
+                "Content-Type: text/plain; charset=utf-8
+",
+                "
+",
+                "Please review the quarterly numbers before the meeting.
+",
+            )
+            .as_bytes()
+            .to_vec(),
+            [Id::new(1545u64).to_string()],
+            None::<Vec<String>>,
+            None,
+        )
+        .await
+        .unwrap()
+        .take_id();
+    test.wait_for_tasks().await;
+
+    for (filter, expected) in [
+        // Words from different fields (RFC 8621, section 4.4.1)
+        (email::query::Filter::text("zq17925 quarterly"), true),
+        (email::query::Filter::text("quarterly probe zq17925"), true),
+        (email::query::Filter::text("zq17925 xk17925"), false),
+        (
+            email::query::Filter::text("\"quarterly numbers\" zq17925"),
+            true,
+        ),
+        // The Subject is indexed without its reply prefix
+        (email::query::Filter::text("Re: Budget zq17925"), true),
+        (email::query::Filter::subject("Re: Budget zq17925"), true),
+        (email::query::Filter::subject("\"Re: Budget\""), true),
+        (
+            email::query::Filter::subject("Budget zq17925 planning"),
+            true,
+        ),
+    ] {
+        let description = format!("{filter:?}");
+        let ids = client
+            .email_query(Some(filter), None::<Vec<_>>)
+            .await
+            .unwrap()
+            .take_ids();
+        assert_eq!(ids.contains(&email_id), expected, "{description}");
     }
 }
 
