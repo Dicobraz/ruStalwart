@@ -11,7 +11,7 @@ use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
     object::email::{Email, EmailComparator, EmailFilter},
 };
-use mail_parser::HeaderName;
+use mail_parser::{HeaderName, parsers::fields::thread::thread_name};
 use nlp::language::Language;
 use std::future::Future;
 use store::{
@@ -53,44 +53,31 @@ impl EmailQuery for Server {
                     EmailFilter::Text(text) => {
                         let (text, language) =
                             Language::detect(text, self.core.email.default_language);
+                        let text = base_subject(&text);
+                        let tokens = text_tokens(&text);
 
-                        filters.push(SearchFilter::Or);
-                        filters.push(SearchFilter::has_text(
-                            EmailSearchField::From,
-                            &text,
-                            Language::None,
-                        ));
-                        filters.push(SearchFilter::has_text(
-                            EmailSearchField::To,
-                            &text,
-                            Language::None,
-                        ));
-                        filters.push(SearchFilter::has_text(
-                            EmailSearchField::Cc,
-                            &text,
-                            Language::None,
-                        ));
-                        filters.push(SearchFilter::has_text(
-                            EmailSearchField::Bcc,
-                            &text,
-                            Language::None,
-                        ));
-                        filters.push(SearchFilter::has_text(
-                            EmailSearchField::Subject,
-                            &text,
-                            language,
-                        ));
-                        filters.push(SearchFilter::has_text(
-                            EmailSearchField::Body,
-                            &text,
-                            language,
-                        ));
-                        filters.push(SearchFilter::has_text(
-                            EmailSearchField::Attachment,
-                            text,
-                            language,
-                        ));
-                        filters.push(SearchFilter::End);
+                        // All tokens must be present, each one in any of the fields
+                        if tokens.len() > 1 {
+                            filters.push(SearchFilter::And);
+                        }
+                        for token in &tokens {
+                            filters.push(SearchFilter::Or);
+                            for (field, field_language) in [
+                                (EmailSearchField::From, Language::None),
+                                (EmailSearchField::To, Language::None),
+                                (EmailSearchField::Cc, Language::None),
+                                (EmailSearchField::Bcc, Language::None),
+                                (EmailSearchField::Subject, language),
+                                (EmailSearchField::Body, language),
+                                (EmailSearchField::Attachment, language),
+                            ] {
+                                filters.push(SearchFilter::has_text(field, *token, field_language));
+                            }
+                            filters.push(SearchFilter::End);
+                        }
+                        if tokens.len() > 1 {
+                            filters.push(SearchFilter::End);
+                        }
                     }
                     EmailFilter::From(text) => filters.push(SearchFilter::has_text(
                         EmailSearchField::From,
@@ -112,11 +99,15 @@ impl EmailQuery for Server {
                         text,
                         Language::None,
                     )),
-                    EmailFilter::Subject(text) => filters.push(SearchFilter::has_text_detect(
-                        EmailSearchField::Subject,
-                        text,
-                        self.core.email.default_language,
-                    )),
+                    EmailFilter::Subject(text) => {
+                        let (text, language) =
+                            Language::detect(text, self.core.email.default_language);
+                        filters.push(SearchFilter::has_text(
+                            EmailSearchField::Subject,
+                            base_subject(&text),
+                            language,
+                        ))
+                    }
                     EmailFilter::Body(text) => filters.push(SearchFilter::has_text_detect(
                         EmailSearchField::Body,
                         text,
@@ -438,4 +429,87 @@ fn thread_keywords(cache: &MessageStoreCache, keyword: Keyword, match_all: bool)
     }
 
     matched_ids
+}
+
+/// The Subject is indexed without its reply and forward prefixes (see `thread_name()`
+/// in the email indexer), so a query for "Re: Budget" must look for "Budget".
+fn base_subject(text: &str) -> String {
+    let (quote, inner) = match text.trim().chars().next() {
+        Some(quote @ ('"' | '\'')) => text
+            .trim()
+            .strip_prefix(quote)
+            .and_then(|t| t.strip_suffix(quote))
+            .map_or((None, text), |inner| (Some(quote), inner)),
+        _ => (None, text),
+    };
+    match (thread_name(inner), quote) {
+        ("", _) => text.to_string(),
+        (base, Some(quote)) => format!("{quote}{base}{quote}"),
+        (base, None) => base.to_string(),
+    }
+}
+
+/// Splits a text condition into words and quoted phrases. Outside of a phrase, white
+/// space separates tokens that must all be present (RFC 8621, section 4.4.1).
+/// Tokens without letters or digits are skipped, as the indexer drops them too.
+fn text_tokens(text: &str) -> Vec<&str> {
+    let mut tokens = Vec::new();
+    let mut rest = text.trim_start();
+    while let Some(ch) = rest.chars().next() {
+        let phrase_end = if matches!(ch, '"' | '\'') {
+            rest[1..]
+                .match_indices(ch)
+                .map(|(pos, _)| pos + 2)
+                .find(|&end| rest[end..].chars().next().is_none_or(char::is_whitespace))
+        } else {
+            None
+        };
+        let end =
+            phrase_end.unwrap_or_else(|| rest.find(char::is_whitespace).unwrap_or(rest.len()));
+        let token = &rest[..end];
+        if token.chars().any(char::is_alphanumeric) {
+            tokens.push(token);
+        }
+        rest = rest[end..].trim_start();
+    }
+    if tokens.is_empty() {
+        tokens.push(text);
+    }
+    tokens
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{base_subject, text_tokens};
+
+    #[test]
+    fn split_text_tokens() {
+        for (text, expected) in [
+            ("zq17925 quarterly", vec!["zq17925", "quarterly"]),
+            ("  one   two\tthree ", vec!["one", "two", "three"]),
+            ("\"cats and dogs\" rain", vec!["\"cats and dogs\"", "rain"]),
+            ("'cats and dogs'", vec!["'cats and dogs'"]),
+            ("don't panic", vec!["don't", "panic"]),
+            ("\"unterminated phrase", vec!["\"unterminated", "phrase"]),
+            ("budget - 2026", vec!["budget", "2026"]),
+            ("single", vec!["single"]),
+            ("-", vec!["-"]),
+        ] {
+            assert_eq!(text_tokens(text), expected, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn strip_subject_prefixes() {
+        for (text, expected) in [
+            ("Re: Budget zq17925", "Budget zq17925"),
+            ("Fwd: Offsite xk17925", "Offsite xk17925"),
+            ("RE: FW: Budget", "Budget"),
+            ("\"Re: Budget\"", "\"Budget\""),
+            ("Budget planning", "Budget planning"),
+            ("Re:", "Re:"),
+        ] {
+            assert_eq!(base_subject(text), expected, "{text:?}");
+        }
+    }
 }
